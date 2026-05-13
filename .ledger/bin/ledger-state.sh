@@ -42,7 +42,7 @@ normalize_state() {
 
 is_valid_phase() {
   case "$1" in
-    "待开始"|"pid"|"contract"|"build"|"build-complete"|"verify-pass"|"shipped") return 0 ;;
+    "待开始"|"pid"|"contract"|"build"|"build-complete"|"verify-pass"|"verify-fail"|"shipped") return 0 ;;
     *) return 1 ;;
   esac
 }

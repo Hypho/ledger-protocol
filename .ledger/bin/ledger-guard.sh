@@ -91,7 +91,7 @@ load_state() {
   [ -n "$PHASE" ] || fail "无法解析当前阶段"
 
   case "$PHASE" in
-    "待开始"|"pid"|"contract"|"build"|"build-complete"|"verify-pass"|"shipped") ;;
+    "待开始"|"pid"|"contract"|"build"|"build-complete"|"verify-pass"|"verify-fail"|"shipped") ;;
     *) fail "非法阶段：$PHASE" ;;
   esac
 }
@@ -130,7 +130,7 @@ guard_contract() {
 
 guard_build() {
   load_state
-  [ "$PHASE" = "contract" ] || fail "/ledger.build blocked: 当前阶段是 $PHASE，不是 contract"
+  [ "$PHASE" = "contract" ] || [ "$PHASE" = "verify-fail" ] || fail "/ledger.build blocked: 当前阶段是 $PHASE，不是 contract 或 verify-fail"
   local contract
   contract=".ledger/contracts/$(feature_slug).md"
   [ -f "$contract" ] || fail "/ledger.build blocked: contract 不存在：$contract"

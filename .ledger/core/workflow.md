@@ -22,7 +22,7 @@ pid -> contract -> build -> verify -> ship
 | `pid` | No active unshipped feature | `state.md`, `boundaries.md`, optional `FDG.md`, optional `intent.md` | `specs/[feature]-pid.md`, `state.md` | high-risk boundary, unresolved dependency, feature too large, large feature plan required |
 | `contract` | phase = `pid`; PID Card exists | PID Card, optional PAD | `contracts/[feature].md`, `state.md` | missing PID Card, unresolved PAD ambiguity, contract too large to verify in one loop |
 | `build` | phase = `contract`; contract exists and lints | contract, PID Card, constitution, optional PAD | code changes, `state.md` | unconfirmed component plan, boundary risk, contract violation |
-| `verify` | phase = `build-complete`; contract exists and lints | contract, optional `intent.md` | `knowledge/[feature]-verify.md`, `state.md` | no real runtime evidence, `FAIL`, `INCONCLUSIVE` |
+| `verify` | phase = `build-complete`; contract exists and lints | contract, optional `intent.md` | `knowledge/[feature]-verify.md`, `state.md` | no real runtime evidence, `FAIL` → set phase `verify-fail` and return to build, `INCONCLUSIVE` |
 | `ship` | phase = `verify-pass`; verify record PASS or manual override | verify record, constitution | archived contract, updated `state.md` | test failure, missing manual acceptance, impact not handled |
 
 ---
