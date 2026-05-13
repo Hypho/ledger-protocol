@@ -74,11 +74,6 @@ Step 4  等待人工确认后再执行
 
 > 流程定义源见 `.ledger/core/workflow.md`。本文件只保留热层摘要，避免多处定义漂移。
 
-> **⚠️ Git Commit 原则**
-> 一个 commit = 一个独立可回滚的变更。不得将多个无关修复合并为一个 commit。
-> 每个 commit 必须能独立 revert 而不影响其他改动。
-> commit message 格式：`fix: / feat: / docs: / refactor:` + 一句话说明改了什么、为什么改。
-
 ---
 
 ## 3. 命令清单
