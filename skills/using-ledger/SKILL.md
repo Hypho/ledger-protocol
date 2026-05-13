@@ -41,6 +41,7 @@ Based on the phase in state.md, load the corresponding skill:
 | `contract` | Contract exists and lints | `ledger:ledger-build` | `bash .ledger/bin/ledger.sh guard build` |
 | `build-complete` | Build done | `ledger:ledger-verify` | `bash .ledger/bin/ledger.sh guard verify` |
 | `verify-pass` | Verify passed | `ledger:ledger-ship` | `bash .ledger/bin/ledger.sh guard ship` |
+| `verify-fail` | Verify failed | `ledger:ledger-build` | `bash .ledger/bin/ledger.sh guard build` |
 
 **How to load a skill:** Use the `Skill` tool with the skill name.
 
@@ -71,7 +72,7 @@ These rules apply at all times when Ledger is active:
 ### State Machine
 
 - `.ledger/state.md` is the single source of truth for current phase
-- Valid phase transitions: `待开始 → pid → contract → build → build-complete → verify → verify-pass → shipped`
+- Valid phase transitions: `待开始 → pid → contract → build → build-complete → verify → verify-pass / verify-fail → shipped`（verify-fail 可回退至 build）
 - Do NOT skip phases
 - Do NOT edit state.md directly unless the phase skill instructs you to
 - Use `bash .ledger/bin/ledger.sh state set-phase <phase>` for state transitions

@@ -179,7 +179,7 @@ verify.md 中不得出现：
 ### 处置
 
 - **PASS** → `bash .ledger/bin/ledger.sh state set-phase verify-pass` → 进入 ledger-ship
-- **FAIL** → 回退 ledger-build
+- **FAIL** → `bash .ledger/bin/ledger.sh state set-phase verify-fail` → 回退 ledger-build
 - **INCONCLUSIVE** → 见下方处置协议
 
 保存路径：`.ledger/knowledge/[功能名]-verify.md`
