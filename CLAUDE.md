@@ -60,6 +60,18 @@ Step 4  等待人工确认后再执行
 每 3-5 个功能：/ledger.retro
 ```
 
+> **⚠️ Guard 强制执行**
+> 进入任何阶段前，必须先执行对应 guard 命令。guard 失败则停止，不得绕过。
+> 即使你认为状态正确，也必须运行 guard。不运行 guard 直接进入阶段 = 违规。
+>
+> ```bash
+> bash .ledger/bin/ledger.sh guard pid
+> bash .ledger/bin/ledger.sh guard contract
+> bash .ledger/bin/ledger.sh guard build
+> bash .ledger/bin/ledger.sh guard verify
+> bash .ledger/bin/ledger.sh guard ship
+> ```
+
 > 流程定义源见 `.ledger/core/workflow.md`。本文件只保留热层摘要，避免多处定义漂移。
 
 ---
@@ -136,7 +148,8 @@ CLAUDE.md              — 当前文件
 
 ## 5. 硬约束
 
-> 完整约束见 `.ledger/core/constitution.md`
+> 完整约束见 `.ledger/core/constitution.md`。
+> 若此处内容为 `[由 /ledger.init Step 2 填写]`，说明项目尚未初始化，请先执行 `/ledger.init`。
 
 [由 /ledger.init Step 2 填写]
 
