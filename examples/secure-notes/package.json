@@ -1,0 +1,9 @@
+{
+  "name": "ledger-example-secure-notes",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "node test/secure-notes.test.js"
+  }
+}
+

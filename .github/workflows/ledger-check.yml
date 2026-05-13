@@ -1,0 +1,25 @@
+name: Ledger Check
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  ledger-check:
+    name: Ledger self-check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Shellcheck lint
+        run: shellcheck .ledger/bin/*.sh .ledger/hooks/*.sh scripts/*.sh
+
+      - name: Run Ledger checks
+        run: bash .ledger/bin/ledger-check.sh

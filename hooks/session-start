@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# Ledger SessionStart Hook
+# Checks if .ledger/ exists in the project and injects using-ledger skill as context.
+# Claude Code plugin session start hook.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Find project root: look for .ledger/ directory
+# Priority: LEDGER_PROJECT_ROOT env var > git root > current directory
+find_project_root() {
+  if [ -n "${LEDGER_PROJECT_ROOT:-}" ] && [ -d "${LEDGER_PROJECT_ROOT}/.ledger" ]; then
+    echo "${LEDGER_PROJECT_ROOT}"
+    return
+  fi
+
+  # Try git root
+  local git_root
+  git_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$git_root" ] && [ -d "${git_root}/.ledger" ]; then
+    echo "${git_root}"
+    return
+  fi
+
+  # Try current directory
+  if [ -d ".ledger" ]; then
+    pwd
+    return
+  fi
+
+  # No .ledger/ found
+  echo ""
+}
+
+PROJECT_ROOT="$(find_project_root)"
+
+# If no .ledger/ directory found, exit silently — Ledger doesn't apply to this project
+if [ -z "$PROJECT_ROOT" ]; then
+  exit 0
+fi
+
+# Read using-ledger skill content
+SKILL_FILE="${PLUGIN_ROOT}/skills/using-ledger/SKILL.md"
+if [ ! -f "$SKILL_FILE" ]; then
+  exit 0
+fi
+
+SKILL_CONTENT=$(cat "$SKILL_FILE" 2>&1 || echo "Error reading using-ledger skill")
+
+# Escape for JSON embedding
+escape_for_json() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '%s' "$s"
+}
+
+SKILL_ESCAPED=$(escape_for_json "$SKILL_CONTENT")
+
+# Build session context
+SESSION_CONTEXT="<EXTREMELY_IMPORTANT>\nThis project uses Ledger (Auditable AI-Assisted Development Protocol).\n\n**Below is the full content of your 'ledger:using-ledger' skill - your protocol for this project. For all other Ledger skills, use the 'Skill' tool:**\n\n${SKILL_ESCAPED}\n</EXTREMELY_IMPORTANT>"
+
+# Output Claude Code hook JSON
+printf '{\n  "hookSpecificOutput": {\n    "hookEventName": "SessionStart",\n    "additionalContext": "%s"\n  }\n}\n' "$SESSION_CONTEXT"
+
+exit 0

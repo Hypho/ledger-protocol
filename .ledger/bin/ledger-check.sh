@@ -1,0 +1,319 @@
+#!/bin/bash
+# Ledger repository self-check.
+# Runs lightweight checks that should pass locally and in GitHub Actions.
+
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+cd "$ROOT"
+
+MODE="${1:---repo}"
+
+case "$MODE" in
+  --repo|--project|--stale) ;;
+  -h|--help)
+    echo "Usage: bash .ledger/bin/ledger-check.sh [--repo|--project|--stale]"
+    echo "  --repo     Check the Ledger framework repository (default)"
+    echo "  --project  Check an installed Ledger project without requiring Ledger release docs"
+    echo "  --stale    Report stale or unhealthy state signals without changing files"
+    exit 0
+    ;;
+  *)
+    echo "Usage: bash .ledger/bin/ledger-check.sh [--repo|--project|--stale]"
+    exit 2
+    ;;
+esac
+
+fail() {
+  echo "❌ $1"
+  exit 1
+}
+
+info() {
+  echo "✅ $1"
+}
+
+lint_state_file() {
+  local file="$1"
+  local norm
+  norm="$(sed -e 's/：/:/g' -e 's/\*\*//g' "$file")"
+
+  for field in "功能" "阶段" "开始时间" "正在做" "阻塞"; do
+    if ! echo "$norm" | grep -q "${field}[[:space:]]*:"; then
+      echo "${file} 缺少 state 字段：${field}"
+      return 1
+    fi
+  done
+
+  local phase_line phase
+  phase_line="$(echo "$norm" | awk '/阶段[[:space:]]*:/ { print; exit }')"
+  if echo "$phase_line" | grep -q '\['; then
+    return 0
+  fi
+
+  phase="$(echo "$phase_line" | awk '
+    {
+      sub(/^.*阶段[[:space:]]*:[[:space:]]*/, "")
+      if (match($0, /[A-Za-z-]+|待开始/)) {
+        print substr($0, RSTART, RLENGTH)
+      }
+    }
+  ')"
+
+  case "$phase" in
+    "待开始"|"pid"|"contract"|"build"|"build-complete"|"verify-pass"|"shipped") ;;
+    *)
+      echo "${file} 包含非法阶段：${phase:-空}"
+      return 1
+      ;;
+  esac
+}
+
+expect_success() {
+  local label="$1"
+  shift
+  set +e
+  "$@" >/dev/null 2>&1
+  local code=$?
+  set -e
+  [ "$code" -eq 0 ] || fail "fixture 应通过但失败：${label}"
+}
+
+expect_failure() {
+  local label="$1"
+  shift
+  set +e
+  "$@" >/dev/null 2>&1
+  local code=$?
+  set -e
+  if [ "$code" -eq 0 ]; then
+    fail "fixture 应失败但通过：${label}"
+  fi
+}
+
+run_stale_check() {
+  local state="${LEDGER_STATE_FILE:-.ledger/state.md}"
+  [ -f "$state" ] || fail "state.md 不存在：$state"
+
+  local norm feature phase started queue_count fail_count now_epoch started_epoch age_hours
+  norm="$(sed -e 's/：/:/g' -e 's/\*\*//g' "$state")"
+  feature="$(echo "$norm" | awk '
+    /功能[[:space:]]*:/ {
+      sub(/^.*功能[[:space:]]*:[[:space:]]*/, "")
+      sub(/[[:space:]]*\|.*$/, "")
+      sub(/[[:space:]]+$/, "")
+      print
+      exit
+    }
+  ')"
+  phase="$(echo "$norm" | awk '
+    /阶段[[:space:]]*:/ {
+      sub(/^.*阶段[[:space:]]*:[[:space:]]*/, "")
+      if (index($0, "[") > 0 && index($0, "待开始") > 0) {
+        print "待开始"
+        exit
+      }
+      if (match($0, /待开始|[A-Za-z-]+/)) {
+        print substr($0, RSTART, RLENGTH)
+      }
+      exit
+    }
+  ')"
+  started="$(echo "$norm" | awk '
+    /开始时间[[:space:]]*:/ {
+      sub(/^.*开始时间[[:space:]]*:[[:space:]]*/, "")
+      sub(/[[:space:]]+$/, "")
+      print
+      exit
+    }
+  ')"
+  queue_count="$(awk '
+    /^## 队列/ { in_queue=1; next }
+    /^## / && in_queue { in_queue=0 }
+    in_queue && /^[[:space:]]*-[[:space:]]+\[[ xX]\][[:space:]]+/ {
+      line=$0
+      sub(/^[[:space:]]*-[[:space:]]+\[[ xX]\][[:space:]]+/, "", line)
+      sub(/[[:space:]]+$/, "", line)
+      if (line != "" && line != "[下一个功能]") count++
+    }
+    END { print count+0 }
+  ' "$state")"
+  fail_count=0
+  if [ -n "$feature" ] && [ "$feature" != "[名称]" ]; then
+    fail_count="$(find .ledger/knowledge/errors -maxdepth 1 -type f -name "${feature}-*.md" 2>/dev/null | wc -l | tr -d '[:space:]')"
+  fi
+
+  echo "Ledger stale diagnostics:"
+  echo "- current: ${feature:-unknown} / ${phase:-unknown}"
+
+  if [ -n "$started" ] && echo "$started" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$'; then
+    now_epoch="$(date +%s)"
+    started_epoch="$(date -d "$started" +%s 2>/dev/null || echo "")"
+    if [ -n "$started_epoch" ]; then
+      age_hours="$(( (now_epoch - started_epoch) / 3600 ))"
+      echo "- current feature age: ${age_hours}h"
+      if [ "$age_hours" -ge "${LEDGER_STALE_HOURS:-72}" ]; then
+        echo "⚠️ current feature has been active for at least ${LEDGER_STALE_HOURS:-72}h"
+      fi
+      if [ "$phase" = "build" ] && [ "$age_hours" -ge "${LEDGER_STALE_BUILD_HOURS:-24}" ]; then
+        echo "⚠️ build phase has been active for at least ${LEDGER_STALE_BUILD_HOURS:-24}h"
+      fi
+    fi
+  fi
+
+  if [ "$fail_count" -ge "${LEDGER_STALE_FAILS:-3}" ]; then
+    echo "⚠️ repeated verify failures: $fail_count"
+  else
+    echo "- verify failure records: $fail_count"
+  fi
+
+  if [ "$queue_count" -eq 0 ] && [ -n "$feature" ] && [ "$feature" != "[名称]" ] && [ "$phase" != "shipped" ]; then
+    echo "⚠️ queue is empty while current feature is still active"
+  else
+    echo "- queue items: $queue_count"
+  fi
+
+  info "Ledger stale diagnostics completed"
+}
+
+if [ "$MODE" = "--stale" ]; then
+  bash .ledger/bin/ledger-state.sh validate >/dev/null
+  run_stale_check
+  exit 0
+fi
+
+extract_version() {
+  local file="$1"
+  grep -m1 -Eo 'v[0-9]+\.[0-9]+\.[0-9]+' "$file" \
+    | sed -E 's/^v//'
+}
+
+if [ "$MODE" = "--repo" ]; then
+  [ -f VERSION ] || fail "VERSION 不存在"
+  VERSION_VALUE="$(tr -d '[:space:]' < VERSION)"
+
+  if ! echo "$VERSION_VALUE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+    fail "VERSION 格式非法：$VERSION_VALUE"
+  fi
+
+  README_VERSION="$(extract_version README.md)"
+  README_ZH_VERSION="$(extract_version README.zh.md)"
+  CLAUDE_VERSION="$(extract_version CLAUDE.md)"
+
+  [ -n "$README_VERSION" ] || fail "README.md 缺少版本号"
+  [ -n "$README_ZH_VERSION" ] || fail "README.zh.md 缺少版本号"
+  [ -n "$CLAUDE_VERSION" ] || fail "CLAUDE.md 缺少版本号"
+
+  if [ "$README_VERSION" != "$VERSION_VALUE" ] || [ "$README_ZH_VERSION" != "$VERSION_VALUE" ] || [ "$CLAUDE_VERSION" != "$VERSION_VALUE" ]; then
+    fail "版本号不一致：VERSION=$VERSION_VALUE README.md=$README_VERSION README.zh.md=$README_ZH_VERSION CLAUDE.md=$CLAUDE_VERSION"
+  fi
+
+  if ! grep -q "| v${VERSION_VALUE} |" README.md; then
+    fail "README.md 版本历史缺少 v${VERSION_VALUE}"
+  fi
+
+  if ! grep -q "| v${VERSION_VALUE} |" README.zh.md; then
+    fail "README.zh.md 版本历史缺少 v${VERSION_VALUE}"
+  fi
+
+  if [ ! -f CHANGELOG.md ]; then
+    fail "CHANGELOG.md 不存在"
+  fi
+
+  if ! grep -q "## v${VERSION_VALUE} " CHANGELOG.md; then
+    fail "CHANGELOG.md 缺少 v${VERSION_VALUE}"
+  fi
+
+  if [ -f ENFORCEMENT_ROADMAP.zh.md ]; then
+    fail "ENFORCEMENT_ROADMAP.zh.md 是内部路线草案，不应进入公开仓库"
+  fi
+
+  if grep -R "ENFORCEMENT_ROADMAP" README.md README.zh.md CLAUDE.md .ledger/core/constitution.md >/dev/null; then
+    fail "公开文档仍引用 ENFORCEMENT_ROADMAP"
+  fi
+fi
+
+if command -v shellcheck >/dev/null 2>&1; then
+  shellcheck .ledger/bin/*.sh .ledger/hooks/*.sh scripts/*.sh || fail "shellcheck 失败"
+  info "shellcheck passed"
+else
+  echo "⏭️ shellcheck not installed, skipping"
+fi
+
+lint_state_file ".ledger/state.md" || fail ".ledger/state.md 结构检查失败"
+[ -f ".ledger/schemas/state.schema.json" ] || fail ".ledger/schemas/state.schema.json 不存在"
+[ -f ".ledger/state.example.json" ] || fail ".ledger/state.example.json 不存在"
+[ -f ".ledger/schemas/queue.schema.json" ] || fail ".ledger/schemas/queue.schema.json 不存在"
+[ -f ".ledger/queue.example.json" ] || fail ".ledger/queue.example.json 不存在"
+[ -f ".ledger/knowledge/patterns.md" ] || fail ".ledger/knowledge/patterns.md 不存在"
+if ! grep -q "## 稳定模式" ".ledger/knowledge/patterns.md"; then
+  fail ".ledger/knowledge/patterns.md 缺少稳定模式章节"
+fi
+if ! grep -q "^## 核心业务主流程" ".ledger/templates/PAD.md"; then
+  fail ".ledger/templates/PAD.md 缺少核心业务主流程章节"
+fi
+if ! grep -q "^## 主流程映射" ".ledger/templates/pid-card.md"; then
+  fail ".ledger/templates/pid-card.md 缺少主流程映射章节"
+fi
+if ! grep -q "^## ADR 触发条件" ".ledger/core/architecture.md"; then
+  fail ".ledger/core/architecture.md 缺少 ADR 触发条件章节"
+fi
+bash .ledger/hooks/check-state.sh
+bash .ledger/bin/ledger-state.sh validate >/dev/null
+
+expect_success "idle state lint" lint_state_file ".ledger/tests/fixtures/state/idle.md"
+expect_success "idle state check" env LEDGER_STATE_FILE=".ledger/tests/fixtures/state/idle.md" bash .ledger/hooks/check-state.sh
+
+expect_success "pid missing fixture lint" lint_state_file ".ledger/tests/fixtures/state/pid-missing-pid-card.md"
+expect_failure "pid missing pid-card" env LEDGER_STATE_FILE=".ledger/tests/fixtures/state/pid-missing-pid-card.md" bash .ledger/hooks/check-state.sh
+
+expect_success "contract missing fixture lint" lint_state_file ".ledger/tests/fixtures/state/contract-missing-contract.md"
+expect_failure "contract missing contract" env LEDGER_STATE_FILE=".ledger/tests/fixtures/state/contract-missing-contract.md" bash .ledger/hooks/check-state.sh
+
+expect_failure "invalid phase lint" lint_state_file ".ledger/tests/fixtures/state/invalid-phase.md"
+expect_failure "verify missing file" env LEDGER_STATE_FILE=".ledger/tests/fixtures/state/verify-pass-missing-verify.md" bash .ledger/hooks/check-state.sh
+expect_failure "current in queue" env LEDGER_STATE_FILE=".ledger/tests/fixtures/state/current-in-queue.md" bash .ledger/bin/ledger-state.sh validate
+expect_failure "current in completed" env LEDGER_STATE_FILE=".ledger/tests/fixtures/state/current-in-completed.md" bash .ledger/bin/ledger-state.sh validate
+expect_failure "duplicate queue" env LEDGER_STATE_FILE=".ledger/tests/fixtures/state/duplicate-queue.md" bash .ledger/bin/ledger-state.sh validate
+expect_failure "duplicate completed" env LEDGER_STATE_FILE=".ledger/tests/fixtures/state/duplicate-completed.md" bash .ledger/bin/ledger-state.sh validate
+expect_failure "unsafe feature name" env LEDGER_STATE_FILE=".ledger/tests/fixtures/state/unsafe-feature-name.md" bash .ledger/bin/ledger-state.sh validate
+
+TMP_ROOT="$(mktemp -d)"
+trap 'rm -rf "$TMP_ROOT"' EXIT
+mkdir -p "$TMP_ROOT/.ledger/knowledge"
+cp ".ledger/tests/fixtures/state/verify-pass-missing-verdict.md" "$TMP_ROOT/.ledger/state.md"
+echo "verdict = FAIL" > "$TMP_ROOT/.ledger/knowledge/fixture-verify-missing-verdict-verify.md"
+expect_failure "verify missing PASS verdict" env LEDGER_ROOT="$TMP_ROOT" bash .ledger/hooks/check-state.sh
+
+bash .ledger/bin/ledger-lint-contract.sh --fixtures
+bash .ledger/bin/ledger-lint-verify.sh --fixtures
+bash .ledger/bin/ledger-lint-pad.sh --fixtures
+bash .ledger/bin/ledger-lint-architecture.sh --fixtures
+bash .ledger/bin/ledger-lint-pid.sh --fixtures
+bash .ledger/bin/ledger-lint-design.sh --fixtures
+bash .ledger/bin/ledger-guard.sh --fixtures
+bash .ledger/bin/ledger-state.sh --fixtures
+bash .ledger/bin/ledger-lint-contract.sh --all
+bash .ledger/bin/ledger-lint-verify.sh --all
+bash .ledger/bin/ledger-lint-pad.sh --all
+bash .ledger/bin/ledger-lint-architecture.sh --all
+bash .ledger/bin/ledger-lint-pid.sh --all
+bash .ledger/bin/ledger-lint-design.sh --all
+
+if [ "$MODE" = "--repo" ]; then
+  for example_dir in examples/*/; do
+    [ -f "${example_dir}.ledger/state.md" ] || continue
+    example_name="$(basename "$example_dir")"
+    example_abs="$(cd "$example_dir" && pwd)"
+    echo "--- example: $example_name ---"
+    lint_state_file "${example_dir}.ledger/state.md" || fail "example $example_name: state.md 结构检查失败"
+    env LEDGER_ROOT="$example_abs" LEDGER_STATE_FILE="$example_abs/.ledger/state.md" bash .ledger/hooks/check-state.sh || fail "example $example_name: state 一致性检查失败"
+    env LEDGER_ROOT="$example_abs" bash .ledger/bin/ledger-lint-pid.sh --all || fail "example $example_name: PID lint 失败"
+    env LEDGER_ROOT="$example_abs" bash .ledger/bin/ledger-lint-contract.sh --all || fail "example $example_name: contract lint 失败"
+    env LEDGER_ROOT="$example_abs" bash .ledger/bin/ledger-lint-verify.sh --all || fail "example $example_name: verify lint 失败"
+    info "example $example_name 验证通过"
+  done
+  info "Ledger 仓库自检通过：VERSION 一致、公开文档无内部路线引用、state / contract / verify / PAD / architecture / PID / design / guard 检查通过、examples 验证通过"
+else
+  info "Ledger 项目自检通过：state / contract / verify / PAD / architecture / PID / design / guard 检查通过"
+fi

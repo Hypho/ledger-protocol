@@ -1,0 +1,33 @@
+# Ledger 测试报告（运行时生成）
+.ledger/tests/reports/
+
+# 依赖与构建产物
+node_modules/
+dist/
+build/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.tmp-ledger-*/
+*.log
+
+# 环境与密钥
+.env
+.env.*
+*.key
+*.pem
+
+# 编辑器与系统
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code 本地设置
+.claude/settings.local.json
+CLAUDE.local.md
+
+# 本地记录文件（不推送仓库）
+*.local.md

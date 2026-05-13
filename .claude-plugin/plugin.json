@@ -1,0 +1,20 @@
+{
+  "name": "ledger",
+  "description": "Ledger — auditable AI-assisted development protocol. Skills-based agent guidance with file-based state, behavior contracts, runtime evidence, and shell-enforced guards.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Hypho"
+  },
+  "homepage": "https://github.com/Hypho/ledger-protocol",
+  "repository": "https://github.com/Hypho/ledger-protocol",
+  "license": "MIT",
+  "keywords": [
+    "contracts",
+    "auditable",
+    "product-intent",
+    "verification",
+    "tdd",
+    "state-machine",
+    "guard"
+  ]
+}
